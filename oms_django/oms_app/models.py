@@ -5,8 +5,8 @@ class Customer(models.Model):
     customer_name = models.CharField(max_length=200, blank=False)
     phone = models.CharField(null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
-    address = models.CharField(max_length=200, blank=False)
-    notes = models.TextField()
+    address = models.CharField(max_length=200, blank=True)
+    notes = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -118,7 +118,7 @@ class Order(models.Model):
         choices=PaymentStatus.choices,
         default=PaymentStatus.UNPAID,
     )
-    notes = models.TextField()
+    notes = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
