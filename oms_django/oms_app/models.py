@@ -2,6 +2,8 @@ from datetime import timedelta
 from django.db import models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
+from decimal import Decimal
 
 
 class Customer(models.Model):
@@ -10,7 +12,7 @@ class Customer(models.Model):
     phone = models.CharField(max_length=255, null=True, blank=True)
     email = models.EmailField(null=True, blank=True) 
     address = models.CharField(max_length=255, null=True, blank=True)
-    notes = models.TextField()
+    notes = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)  
     updated_at = models.DateTimeField(auto_now=True)      
 
@@ -86,7 +88,11 @@ class ProductVariant(models.Model):
 
     size = models.CharField(max_length=255, choices=Size.choices, null=True, blank=True)
     size_unit = models.CharField(max_length=255, choices=SizeUnit.choices, null=True, blank=True)
-
+    unit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)  
     updated_at = models.DateTimeField(auto_now=True)      
@@ -108,6 +114,24 @@ class Payment(models.Model):
     payment_id = models.BigAutoField(primary_key=True)
     payment_date = models.DateTimeField(auto_now_add=True)
 
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.PROTECT,
+        db_column="customer_id",
+        related_name="payments",
+        null=True,
+        blank=True,
+    )
+
+    order = models.ForeignKey(
+        "Order",
+        on_delete=models.PROTECT,
+        db_column="order_id",
+        related_name="payments",
+        null=True,
+        blank=True,
+    )
+
     payment_method = models.CharField(
         max_length=255,
         choices=PaymentMethod.choices
@@ -121,7 +145,7 @@ class Payment(models.Model):
     )
     utang_due_date = models.DateField(null=True, blank=True)
 
-    amount_paid = models.DecimalField(max_digits=8, decimal_places=2)
+    amount_paid = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     notes = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -185,22 +209,15 @@ class Order(models.Model):
         default=OrderStatus.PENDING,
     )
 
-    payment = models.ForeignKey(
-        Payment,
-        on_delete=models.PROTECT,
-        db_column="payment_id",
-        related_name="orders",
-        null=True,
-        blank=True
-    )
-
     payment_status = models.CharField(
         max_length=255,
         choices=PaymentStatus.choices,
         default=PaymentStatus.UNPAID,
     )
 
-    notes = models.CharField(max_length=255)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    subtotal_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    notes = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)  
     updated_at = models.DateTimeField(auto_now=True)      
 
@@ -218,13 +235,28 @@ class OrderItem(models.Model):
         related_name="items",
     )
 
+    # link to the actual variant sold
+    variant = models.ForeignKey(
+        ProductVariant,
+        on_delete=models.PROTECT,
+        db_column="variant_id",
+        related_name="order_items",
+        null=True,
+        blank=True,
+    )
+
     sku = models.CharField(max_length=255, null=True, blank=True)
-    quantity = models.IntegerField()
-    unit_price = models.DecimalField(max_digits=8, decimal_places=2)
+    quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    unit_price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=8, decimal_places=2)
 
-    created_at = models.DateTimeField(auto_now_add=True)  
-    updated_at = models.DateTimeField(auto_now=True)      
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "Order Items"
+
+    def save(self, *args, **kwargs):
+        qty = Decimal(str(self.quantity or 0))
+        self.total = (Decimal(self.unit_price or 0) * qty).quantize(Decimal("0.01"))
+        super().save(*args, **kwargs)
