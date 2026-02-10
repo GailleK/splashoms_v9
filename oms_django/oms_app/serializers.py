@@ -2,6 +2,7 @@
 from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
+from django.db.models import Sum
 
 from .models import (
     Customer,
@@ -52,6 +53,7 @@ class ProductSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    variants_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Product
@@ -191,9 +193,19 @@ class OrderSerializer(serializers.ModelSerializer):
     # Optional: allow creating/updating items in the same request (non-POS admin usage)
     items_payload = OrderItemSerializer(many=True, write_only=True, required=False)
 
+    paid_amount = serializers.SerializerMethodField()
+    balance_amount = serializers.SerializerMethodField()
+    last_payment_method = serializers.SerializerMethodField()
+    utang_due_date = serializers.SerializerMethodField()
+
+    def get_utang_due_date(self, obj):
+        p = obj.payments.filter(payment_method="Utang").order_by("payment_date").first()
+        return p.utang_due_date if p else None
+
     class Meta:
         model = Order
-        fields = "__all__"
+        fields = "__all__"  # keep, since these will be added automatically
+
 
     def create(self, validated_data):
         items_data = validated_data.pop("items_payload", [])
@@ -218,6 +230,20 @@ class OrderSerializer(serializers.ModelSerializer):
                 OrderItem.objects.create(order=order, **item)
 
         return order
+
+    def get_paid_amount(self, obj):
+        s = obj.payments.aggregate(total=Sum("amount_paid"))["total"]
+        return s or Decimal("0.00")
+
+    def get_balance_amount(self, obj):
+        paid = self.get_paid_amount(obj)
+        total = obj.total_amount or Decimal("0.00")
+        bal = total - paid
+        return bal if bal > 0 else Decimal("0.00")
+
+    def get_last_payment_method(self, obj):
+        p = obj.payments.order_by("-payment_date").first()
+        return p.payment_method if p else None
 
 
 # -------------------------
@@ -297,11 +323,14 @@ class CheckoutSerializer(serializers.Serializer):
         notes = validated_data.get("notes", "") or ""
 
         # 1) customer
-        customer_name = validated_data["customer_name"].strip()
+        customer_name = (validated_data["customer_name"] or "").strip()
         if not customer_name:
             raise serializers.ValidationError({"customer_name": "Customer name is required."})
 
-        customer, _ = Customer.objects.get_or_create(customer_name=customer_name)
+        customer, _ = Customer.objects.get_or_create(
+            customer_name_norm=customer_name.lower(),
+            defaults={"customer_name": customer_name},
+        )
 
         payment_method = validated_data["payment_method"]
         utang_duration = validated_data.get("utang_duration")  # already normalized in validate()
@@ -383,3 +412,74 @@ class CheckoutSerializer(serializers.Serializer):
             order.save(update_fields=["payment_status"])
 
         return order
+    
+
+
+class AddPaymentSerializer(serializers.Serializer):
+    """
+    Add a new payment to an existing order (for installments / utang collection).
+    """
+    payment_method = serializers.ChoiceField(choices=["Cash", "Gcash"])
+    amount_paid = serializers.DecimalField(max_digits=8, decimal_places=2)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_amount_paid(self, value):
+        if value is None or value <= Decimal("0.00"):
+            raise serializers.ValidationError("Amount must be greater than 0.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        order = self.context["order"]
+
+        if not order.customer:
+            raise serializers.ValidationError("Order has no customer attached.")
+
+        payment = Payment.objects.create(
+            customer=order.customer,
+            order=order,
+            payment_method=validated_data["payment_method"],
+            amount_paid=validated_data["amount_paid"],
+            notes=validated_data.get("notes", ""),
+        )
+
+        # ✅ Recompute payment_status from ledger totals
+        paid_total = order.payments.aggregate(s=Sum("amount_paid"))["s"] or Decimal("0.00")
+        total = order.total_amount or Decimal("0.00")
+
+        if paid_total <= 0:
+            order.payment_status = Order.PaymentStatus.UNPAID
+        elif paid_total < total:
+            order.payment_status = Order.PaymentStatus.PARTIALLY_PAID
+        else:
+            order.payment_status = Order.PaymentStatus.PAID
+
+        order.save(update_fields=["payment_status"])
+
+        return payment
+
+
+class ProductDetailSerializer(ProductSerializer):
+    variants = ProductVariantSerializer(many=True, read_only=True)
+
+    class Meta(ProductSerializer.Meta):
+        fields = "__all__"
+
+
+class OrderEditItemSerializer(serializers.Serializer):
+    # accept either "order_item_id" or "id"
+    order_item_id = serializers.IntegerField(required=False)
+    id = serializers.IntegerField(required=False)
+    quantity = serializers.IntegerField(min_value=1)
+
+    def validate(self, attrs):
+        if not attrs.get("order_item_id") and not attrs.get("id"):
+            raise serializers.ValidationError("Item must include order_item_id or id.")
+        return attrs
+
+class OrderEditSerializer(serializers.Serializer):
+    customer_id = serializers.IntegerField(allow_null=True, required=False)
+    payment_method = serializers.ChoiceField(choices=["Cash", "Gcash", "Utang"])
+    utang_duration = serializers.ChoiceField(choices=["7D", "1M"], allow_null=True, required=False)
+    paid_amount_total = serializers.DecimalField(max_digits=10, decimal_places=2)
+    items = OrderEditItemSerializer(many=True)

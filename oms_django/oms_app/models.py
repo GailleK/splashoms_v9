@@ -9,15 +9,23 @@ from decimal import Decimal
 class Customer(models.Model):
     customer_id = models.BigAutoField(primary_key=True)
     customer_name = models.CharField(max_length=255)
+
+    customer_name_norm = models.CharField(max_length=255, unique=True, editable=False, null=True, blank=True)
+
     phone = models.CharField(max_length=255, null=True, blank=True)
-    email = models.EmailField(null=True, blank=True) 
+    email = models.EmailField(null=True, blank=True)
     address = models.CharField(max_length=255, null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)  
-    updated_at = models.DateTimeField(auto_now=True)      
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "Customers"
+
+    def save(self, *args, **kwargs):
+        self.customer_name = (self.customer_name or "").strip()
+        self.customer_name_norm = self.customer_name.lower()
+        super().save(*args, **kwargs)
 
 
 class ProductCategory(models.Model):
@@ -125,7 +133,7 @@ class Payment(models.Model):
 
     order = models.ForeignKey(
         "Order",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         db_column="order_id",
         related_name="payments",
         null=True,
@@ -172,6 +180,10 @@ class Payment(models.Model):
                 # simplest “1 month” approximation is 30 days;
                 # if you want true calendar months, use dateutil.relativedelta in app code.
                 self.utang_due_date = base_date + timedelta(days=30)
+        else:
+            # normalize in save too (prevents dirty rows if someone bypasses serializer)
+            self.utang_due_date = None
+            self.utang_duration = None
 
         super().save(*args, **kwargs)
 
