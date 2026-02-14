@@ -301,3 +301,10 @@ class ProductVariantAdminViewSet(viewsets.ModelViewSet):
         if product_id:
             qs = qs.filter(product_id=product_id)
         return qs
+
+    @action(detail=False, methods=["get"], url_path="choices")
+    def choices(self, request):
+        return Response({
+            "size": [{"value": v, "label": l} for v, l in ProductVariant.Size.choices],
+            "size_unit": [{"value": v, "label": l} for v, l in ProductVariant.SizeUnit.choices],
+        })

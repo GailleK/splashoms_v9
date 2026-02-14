@@ -71,6 +71,7 @@ class ProductVariant(models.Model):
 
     class SizeUnit(models.TextChoices):
         LITER = "Liter", "Liter"
+        ML = "mL", "mL"
         KILO = "Kilo", "Kilo"
         GALLON = "Gallon", "Gallon"
 

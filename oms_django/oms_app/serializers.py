@@ -118,6 +118,7 @@ class ProductVariantPOSSerializer(serializers.ModelSerializer):
 
         unit_map = {
             "Liter": "L",
+            "mL":"mL",
             "Kilo": "kg",
             "Gallon": "gal",
         }
