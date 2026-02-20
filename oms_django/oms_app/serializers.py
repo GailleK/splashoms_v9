@@ -1,6 +1,7 @@
 # serializers.py
 from decimal import Decimal
 from django.db import transaction
+from django.templatetags.static import static
 from rest_framework import serializers
 from django.db.models import Sum
 
@@ -100,12 +101,14 @@ class ProductVariantPOSSerializer(serializers.ModelSerializer):
     category = serializers.CharField(source="product.category.category_name", read_only=True, allow_null=True)
     scent = serializers.CharField(source="scent.name", read_only=True, allow_null=True)
     price = serializers.DecimalField(source="unit_price", max_digits=10, decimal_places=2, read_only=True)
+    image_path = serializers.CharField(read_only=True, allow_null=True)
+    image_url = serializers.SerializerMethodField()
 
     size = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductVariant
-        fields = ["id", "name", "size", "price", "category", "scent", "is_active"]
+        fields = ["id", "name", "size", "price", "category", "scent", "image_path", "image_url", "is_active"]
 
     def get_size(self, obj):
         """
@@ -124,6 +127,26 @@ class ProductVariantPOSSerializer(serializers.ModelSerializer):
         }
         u = unit_map.get(obj.size_unit, obj.size_unit or "")
         return f"{obj.size}{u}"
+
+    def get_image_url(self, obj):
+        raw = (obj.image_path or "").strip()
+        if not raw:
+            return None
+
+        if raw.startswith(("http://", "https://", "data:")):
+            return raw
+
+        request = self.context.get("request")
+        if "/" not in raw:
+            static_path = static(f"Products/{raw}")
+            if request:
+                return request.build_absolute_uri(static_path)
+            return static_path
+
+        normalized = raw if raw.startswith("/") else f"/{raw}"
+        if request:
+            return request.build_absolute_uri(normalized)
+        return normalized
 
 
 # -------------------------
