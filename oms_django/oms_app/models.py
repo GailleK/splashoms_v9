@@ -26,6 +26,9 @@ class Customer(models.Model):
         self.customer_name = (self.customer_name or "").strip()
         self.customer_name_norm = self.customer_name.lower()
         super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return self.customer_name
 
 
 class ProductCategory(models.Model):
@@ -36,6 +39,9 @@ class ProductCategory(models.Model):
 
     class Meta:
         db_table = "Product Category"
+    
+    def __str__(self):
+        return self.category_name
 
 
 class Product(models.Model):
@@ -54,6 +60,9 @@ class Product(models.Model):
 
     class Meta:
         db_table = "Products"
+    
+    def __str__(self):
+        return self.product_name
 
 
 class Scent(models.Model):
@@ -62,6 +71,9 @@ class Scent(models.Model):
 
     class Meta:
         db_table = "Scent"
+    
+    def __str__(self):
+        return self.name
 
 
 class ProductVariant(models.Model):
@@ -102,12 +114,16 @@ class ProductVariant(models.Model):
         decimal_places=2,
         default=0
     )
+    image_path = models.CharField(max_length=255, blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)  
     updated_at = models.DateTimeField(auto_now=True)      
 
     class Meta:
         db_table = "Product Variants"
+    
+    def __str__(self):
+        return f"{self.product.product_name} - {self.scent.name} - {self.size}{self.size_unit}"
 
 
 class Payment(models.Model):
